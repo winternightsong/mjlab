@@ -1,0 +1,281 @@
+"""KUAVO S45 velocity environment configurations (Adapted from Kuavo4)."""
+
+import torch
+
+from mjlab.asset_zoo.robots import (
+    S45_ACTION_SCALE,
+    get_s45_robot_cfg,
+)
+
+# 尝试引入 Play 模式下的全碰撞配置 (兼容性写法)
+try:
+    from mjlab.asset_zoo.robots.kuavo_s45.s45_constants import FULL_COLLISION
+    HAS_FULL_COLLISION = True
+except ImportError:
+    HAS_FULL_COLLISION = False
+
+from mjlab.envs import ManagerBasedRlEnvCfg
+from mjlab.envs import mdp as envs_mdp
+from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.reward_manager import RewardTermCfg
+from mjlab.sensor import ContactMatch, ContactSensorCfg
+from mjlab.tasks.velocity import mdp
+from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
+from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
+
+
+# ---------------------------------------------------------------------------
+# 自定义奖励函数：禁止跳跃（强制交替步态）
+# ---------------------------------------------------------------------------
+def no_hopping_penalty(env, sensor_name: str) -> torch.Tensor:
+    """
+    惩罚双脚同时腾空（跳跃）。
+    """
+    contact_found = env.scene[sensor_name].data.found
+    num_feet_on_ground = torch.sum(contact_found.float(), dim=1)
+    both_feet_in_air = (num_feet_on_ground == 0).float()
+    return both_feet_in_air
+
+
+def kuavo_s45_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+    """Create kuavo S45 rough terrain velocity configuration."""
+    cfg = make_velocity_env_cfg()
+
+    cfg.sim.mujoco.ccd_iterations = 500
+    cfg.sim.contact_sensor_maxmatch = 500
+    cfg.sim.nconmax = 45
+
+    # ========================================
+    # Play模式使用FULL_COLLISION，训练模式使用默认配置 (参照Kuavo4)
+    # ========================================
+    if play and HAS_FULL_COLLISION:
+        robot_cfg = get_s45_robot_cfg()
+        robot_cfg.collisions = (FULL_COLLISION,)
+        cfg.scene.entities = {"robot": robot_cfg}
+    else:
+        cfg.scene.entities = {"robot": get_s45_robot_cfg()}
+
+    # ========================================
+    # 传感器配置
+    # ========================================
+    feet_ground_cfg = ContactSensorCfg(
+        name="feet_ground_contact",
+        primary=ContactMatch(
+            mode="subtree",
+            pattern=r"^(leg_l6_link|leg_r6_link)$",
+            entity="robot",
+        ),
+        secondary=ContactMatch(mode="body", pattern="terrain"),
+        fields=("found", "force"),
+        reduce="netforce",
+        num_slots=1,
+        track_air_time=True,
+    )
+    
+    self_collision_cfg = ContactSensorCfg(
+        name="self_collision",
+        primary=ContactMatch(mode="subtree", pattern="base_link", entity="robot"),
+        secondary=ContactMatch(mode="subtree", pattern="base_link", entity="robot"),
+        fields=("found",),
+        reduce="none",
+        num_slots=1,
+    )
+    cfg.scene.sensors = (feet_ground_cfg, self_collision_cfg)
+
+    if cfg.scene.terrain is not None and cfg.scene.terrain.terrain_generator is not None:
+        cfg.scene.terrain.terrain_generator.curriculum = True
+
+    joint_pos_action = cfg.actions["joint_pos"]
+    assert isinstance(joint_pos_action, JointPositionActionCfg)
+    joint_pos_action.scale = S45_ACTION_SCALE
+
+    cfg.viewer.body_name = "base_link"
+
+    # ========================================
+    # 指令方向锁定：初期训练逼迫直走
+    # ========================================
+    twist_cmd = cfg.commands["twist"]
+    assert isinstance(twist_cmd, UniformVelocityCommandCfg)
+    twist_cmd.viz.z_offset = 1.15
+    twist_cmd.ranges.lin_vel_x = (0.5, 1.0)  
+    twist_cmd.ranges.lin_vel_y = (0.0, 0.0)  
+    twist_cmd.ranges.ang_vel_z = (0.0, 0.0)  
+
+    # ========================================
+    # 传感器名称修正（极度关键！参照Kuavo4）
+    # ========================================
+    # 将底层的状态获取重定向到我们 XML 中定义的 BodyGyro 和 BodyVel
+    if "base_ang_vel" in cfg.observations["policy"].terms:
+        cfg.observations["policy"].terms["base_ang_vel"].params["sensor_name"] = "robot/BodyGyro"
+    if "base_lin_vel" in cfg.observations["critic"].terms:
+        cfg.observations["critic"].terms["base_lin_vel"].params["sensor_name"] = "robot/BodyVel"
+
+    # ========================================
+    # 事件配置
+    # ========================================
+    cfg.events["base_com"].params["asset_cfg"].body_names = ("base_link",)
+    
+    # 匹配 S45 的脚部碰撞体命名
+    cfg.events["foot_friction"].params["asset_cfg"].geom_names = r"^(left|right)_foot_col.*$"
+    
+    # 参照 Kuavo4 禁用可能导致报错的摩擦事件
+    cfg.events.pop("body_friction", None)
+
+    cfg.events["push_robot"] = EventTermCfg(
+        func=envs_mdp.push_by_setting_velocity,
+        mode="interval",
+        interval_range_s=(10.0, 15.0),
+        params={
+            "velocity_range": {
+                "x": (-1.0, 1.0), 
+                "y": (-1.0, 1.0), 
+            }
+        },
+    )
+
+    # ========================================
+    # 奖励函数调整 (结合 Kuavo4 精调与防瘫痪策略)
+    # ========================================
+    
+    if "action_rate_l2" in cfg.rewards:
+        cfg.rewards["action_rate_l2"].weight = -0.01
+
+    if "track_linear_velocity" in cfg.rewards:
+        cfg.rewards["track_linear_velocity"].weight = 3.0
+
+    cfg.rewards["foot_slip"].weight = -1.0
+    cfg.rewards["air_time"].weight = 2.0
+    cfg.rewards["air_time"].params["threshold_min"] = 0.1
+
+    cfg.rewards["no_hopping"] = RewardTermCfg(
+        func=no_hopping_penalty,
+        weight=-1.0,  
+        params={"sensor_name": "feet_ground_contact"},
+    )
+
+
+# S45 有专门的脚底 site，直接使用 site_names，这是框架底层最原生的计算方式
+    site_names = ("l_ft_frame", "r_ft_frame")
+    for r_name in ["foot_clearance", "foot_slip", "foot_swing_height"]:
+        if r_name in cfg.rewards:
+            cfg.rewards[r_name].params["asset_cfg"].site_names = site_names
+            cfg.rewards[r_name].params["asset_cfg"].body_names = None
+
+    # 参照 Kuavo4：禁用 XML 传感器不支持或不稳定的奖励
+    cfg.rewards.pop("angular_momentum", None)
+    cfg.rewards.pop("soft_landing", None)
+
+    # 辅助与碰撞
+    cfg.rewards["foot_swing_height"].weight = -5.0 
+    cfg.rewards["body_ang_vel"].weight = -0.05
+    cfg.rewards["upright"].params["asset_cfg"].body_names = ("base_link",)
+    cfg.rewards["body_ang_vel"].params["asset_cfg"].body_names = ("base_link",)
+
+    cfg.rewards["self_collisions"] = RewardTermCfg(
+        func=mdp.self_collision_cost,
+        weight=-1.0,
+        params={"sensor_name": self_collision_cfg.name},
+    )
+
+    # -----------------------------------------------------------------------
+    # 姿态约束 (完全采用 Kuavo4 的严谨逻辑：严格限制手臂，适度放宽下肢)
+    # -----------------------------------------------------------------------
+    cfg.rewards["pose"].params["std_standing"] = {".*": 0.05}
+    
+    cfg.rewards["pose"].params["std_walking"] = {
+        # 下肢 - 允许稍宽的步幅，但依然控制侧倾和偏航防外八字
+        r"leg_[lr]3_joint.*": 0.5,   # Hip pitch
+        r"leg_[lr]1_joint.*": 0.2,   # Hip roll
+        r"leg_[lr]2_joint.*": 0.15,  # Hip yaw
+        r"leg_[lr]4_joint.*": 0.5,   # Knee
+        r"leg_[lr]5_joint.*": 0.15,  # Ankle pitch
+        r"leg_[lr]6_joint.*": 0.1,   # Ankle roll
+
+        # 手臂 - 极度严格限制，防止上肢乱挥破坏重心！
+        r"zarm_[lr]1_joint.*": 0.2, # Arm pitch
+        r"zarm_l2_joint.*": 0.005,    # Left arm roll (极其严格)
+        r"zarm_r2_joint.*": 0.005,    # Right arm roll (极其严格)
+        r"zarm_[lr]3_joint.*": 0.005, # Arm yaw (极其严格)
+        r"zarm_[lr]4_joint.*": 0.005,  # Elbow
+        r"zarm_[lr]5_joint.*": 0.01, # Hand yaw
+        r"zarm_[lr]6_joint.*": 0.01, # Hand roll
+        r"zarm_[lr]7_joint.*": 0.01, # Hand pitch
+
+        # 头部
+        r"zhead_[12]_joint.*": 0.005,
+    }
+    
+    cfg.rewards["pose"].params["std_running"] = {
+        # 下肢 - 更宽松的活动范围
+        r"leg_[lr]3_joint.*": 0.5,
+        r"leg_[lr]1_joint.*": 0.3,     
+        r"leg_[lr]2_joint.*": 0.2,
+        r"leg_[lr]4_joint.*": 0.5,
+        r"leg_[lr]5_joint.*": 0.2,
+        r"leg_[lr]6_joint.*": 0.1,
+
+        # 手臂
+        r"zarm_[lr]1_joint.*": 0.2,
+        r"zarm_l2_joint.*": 0.005,
+        r"zarm_r2_joint.*": -0.005,
+        r"zarm_[lr]3_joint.*": 0.005,
+        r"zarm_[lr]4_joint.*": 0.005,
+        r"zarm_[lr]5_joint.*": 0.01,
+        r"zarm_[lr]6_joint.*": 0.01,
+        r"zarm_[lr]7_joint.*": 0.01,
+
+        # 头部
+        r"zhead_[12]_joint.*": 0.005,
+    }
+
+    # ========================================
+    # Play模式配置
+    # ========================================
+    if play:
+        cfg.episode_length_s = int(1e9)
+        cfg.observations["policy"].enable_corruption = False
+        cfg.events.pop("push_robot", None)
+        
+        cfg.events["randomize_terrain"] = EventTermCfg(
+            func=envs_mdp.randomize_terrain,
+            mode="reset",
+            params={},
+        )
+
+        if cfg.scene.terrain is not None:
+            if cfg.scene.terrain.terrain_generator is not None:
+                cfg.scene.terrain.terrain_generator.curriculum = False
+                cfg.scene.terrain.terrain_generator.num_cols = 5
+                cfg.scene.terrain.terrain_generator.num_rows = 5
+                cfg.scene.terrain.terrain_generator.border_width = 10.0
+
+    return cfg
+
+
+def kuavo_s45_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+    """Create kuavo S45 flat terrain velocity configuration."""
+    cfg = kuavo_s45_rough_env_cfg(play=play)
+
+    cfg.sim.njmax = 300
+    cfg.sim.mujoco.ccd_iterations = 50
+    cfg.sim.contact_sensor_maxmatch = 64
+    cfg.sim.nconmax = None
+
+    # Switch to flat terrain.
+    assert cfg.scene.terrain is not None
+    cfg.scene.terrain.terrain_type = "plane"
+    cfg.scene.terrain.terrain_generator = None
+
+    # Disable terrain curriculum.
+    assert "terrain_levels" in cfg.curriculum
+    del cfg.curriculum["terrain_levels"]
+
+    if play:
+        twist_cmd = cfg.commands["twist"]
+        assert isinstance(twist_cmd, UniformVelocityCommandCfg)
+        twist_cmd.ranges.lin_vel_x = (0.5, 1.0)
+        twist_cmd.ranges.lin_vel_y = (0.0, 0.0)
+        twist_cmd.ranges.ang_vel_z = (0.0, 0.0)
+
+    return cfg

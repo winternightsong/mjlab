@@ -16,3 +16,9 @@ from mjlab.asset_zoo.robots.unitree_go1.go1_constants import (
 from mjlab.asset_zoo.robots.unitree_go1.go1_constants import (
   get_go1_robot_cfg as get_go1_robot_cfg,
 )
+from mjlab.asset_zoo.robots.kuavo_s45.s45_constants import (
+  S45_ACTION_SCALE as S45_ACTION_SCALE,
+)
+from mjlab.asset_zoo.robots.kuavo_s45.s45_constants import (
+  get_s45_robot_cfg as get_s45_robot_cfg,
+)

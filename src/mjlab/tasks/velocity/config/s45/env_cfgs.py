@@ -36,48 +36,68 @@ def no_hopping_penalty(env, sensor_name: str) -> torch.Tensor:
     num_feet_on_ground = torch.sum(contact_found.float(), dim=1)
     both_feet_in_air = (num_feet_on_ground == 0).float()
     return both_feet_in_air
+ # ---------------------------------------------------------------------------
+# 3. 柔性惩罚：限制手肘挥动速度 (治愈“扇扇子”综合征)
 # ---------------------------------------------------------------------------
-# 1. 关节位置与相位全状态跟踪 (Position & Velocity Phase Coupling)
-# ---------------------------------------------------------------------------
-def reward_gait_arm_phase_coupling(env, arm_pitch_names: list[str], leg_pitch_names: list[str], 
-                                   arm_default: float, leg_default: float, gain: float) -> torch.Tensor:
+def penalty_elbow_velocity(env, elbow_names: list[str]) -> torch.Tensor:
     """
-    步态与手臂相位的终极耦合。
-    不仅鼓励实际关节位置 (dof_pos) 接近动态生成的参考位置 (ref_dof_pos)，
-    同时引入速度相位 (dof_vel) 跟踪，强制手臂的加减速节奏与腿部步态频率完美锁相。
+    惩罚手肘的快速开合。
+    只要它不频繁挥动手肘，就不会扣分；挥得越快，扣分越多。
     """
-    joint_pos = env.scene["robot"].data.joint_pos
     joint_vel = env.scene["robot"].data.joint_vel
     
+    l_idx = env.scene["robot"].find_joints(elbow_names[0])[0]
+    r_idx = env.scene["robot"].find_joints(elbow_names[1])[0]
+    
+    v_l = joint_vel[:, l_idx].squeeze(-1)
+    v_r = joint_vel[:, r_idx].squeeze(-1)
+    
+    # 惩罚角速度的平方
+    return torch.square(v_l) + torch.square(v_r)   
+# ---------------------------------------------------------------------------
+# 1. 柔性正向奖励：肩关节步态追踪 (给糖模式)
+# ---------------------------------------------------------------------------
+def reward_gait_arm_tracking(env, arm_pitch_names: list[str], leg_pitch_names: list[str], 
+                             arm_default: float, leg_default: float, gain: float) -> torch.Tensor:
+    """
+    鼓励肩膀跟随腿部步态摆动。
+    完全正向奖励：摆对了最高拿 1.0 分，摆错了最多也就是 0 分，绝不倒扣。
+    """
+    joint_pos = env.scene["robot"].data.joint_pos
     arm_l_idx = env.scene["robot"].find_joints(arm_pitch_names[0])[0]
     arm_r_idx = env.scene["robot"].find_joints(arm_pitch_names[1])[0]
     leg_l_idx = env.scene["robot"].find_joints(leg_pitch_names[0])[0]
     leg_r_idx = env.scene["robot"].find_joints(leg_pitch_names[1])[0]
-
-    # 提取位置与速度并降维
     q_arm_l, q_arm_r = joint_pos[:, arm_l_idx].squeeze(-1), joint_pos[:, arm_r_idx].squeeze(-1)
     q_leg_l, q_leg_r = joint_pos[:, leg_l_idx].squeeze(-1), joint_pos[:, leg_r_idx].squeeze(-1)
-    
-    v_arm_l, v_arm_r = joint_vel[:, arm_l_idx].squeeze(-1), joint_vel[:, arm_r_idx].squeeze(-1)
-    v_leg_l, v_leg_r = joint_vel[:, leg_l_idx].squeeze(-1), joint_vel[:, leg_r_idx].squeeze(-1)
 
-    # --- 动态计算 Reference DOF Pos & Vel ---
-    # 左腿配左手(同侧)，因为我们用负号 gain 反转了极性，所以这在物理上等于人类的交叉摆臂
     ref_q_arm_l = arm_default + gain * (q_leg_l - leg_default)
     ref_q_arm_r = arm_default + gain * (q_leg_r - leg_default)
-    
-    # 速度导数直接映射
-    ref_v_arm_l = gain * v_leg_l
-    ref_v_arm_r = gain * v_leg_r
 
-    # 计算位置与速度的追踪误差平方
-    pos_error = torch.square(q_arm_l - ref_q_arm_l) + torch.square(q_arm_r - ref_q_arm_r)
-    vel_error = torch.square(v_arm_l - ref_v_arm_l) + torch.square(v_arm_r - ref_v_arm_r)
+    error = torch.square(q_arm_l - ref_q_arm_l) + torch.square(q_arm_r - ref_q_arm_r)
     
-    # 使用双重高斯核返回归一化奖励 (位置权重极高，速度权重略低作为相位辅助)
-    return torch.exp(-pos_error / 0.1) * torch.exp(-vel_error / 10.0)
+    # 误差越小，得分越接近 1.0
+    return torch.exp(-error / 0.1)
 
 # ---------------------------------------------------------------------------
+# 2. 柔性正向奖励：保持屈肘 (鼓励人类跑步姿态)
+# ---------------------------------------------------------------------------
+def reward_elbow_angle(env, elbow_names: list[str], target_angle: float) -> torch.Tensor:
+    """
+    鼓励保持屈肘，而不是死死锁住。
+    """
+    joint_pos = env.scene["robot"].data.joint_pos
+    
+    l_idx = env.scene["robot"].find_joints(elbow_names[0])[0]
+    r_idx = env.scene["robot"].find_joints(elbow_names[1])[0]
+    
+    q_l = joint_pos[:, l_idx].squeeze(-1)
+    q_r = joint_pos[:, r_idx].squeeze(-1)
+    
+    error = torch.square(q_l - target_angle) + torch.square(q_r - target_angle)
+    return torch.exp(-error / 0.1)
+
+# 半周期对称性保留你之前写好的那个正向函数 reward_half_period_symmetry
 # 2. 半周期对称性奖励 (Half Period Symmetry)
 # ---------------------------------------------------------------------------
 def reward_half_period_symmetry(env, left_arm_names: list[str], right_arm_names: list[str], arm_pitch_default: float) -> torch.Tensor:
@@ -216,20 +236,45 @@ def kuavo_s45_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         params={"sensor_name": "feet_ground_contact"},
     )
 
+# 抑制手肘乱挥
+    cfg.rewards["elbow_velocity_penalty"] = RewardTermCfg(
+        func=penalty_elbow_velocity,
+        weight=-0.05,  # 极小的负权重。像空气阻力一样，不致死，但让它觉得挥手肘“很不划算”
+        params={
+            "elbow_names": ["zarm_l4_joint", "zarm_r4_joint"]
+        },
+    )
+    
 # -----------------------------------------------------------------------
-    # 注入：步态-手臂相位耦合与半周期对称
+    # [胡萝卜机制] 引导自然摆臂，不再强迫
     # -----------------------------------------------------------------------
-    cfg.rewards["gait_arm_phase_coupling"] = RewardTermCfg(
-        func=reward_gait_arm_phase_coupling,
-        weight=2.5,  # 给予极高的正向权重，诱导它发现这个完美的步态
+    
+    # 1. 引导肩膀交叉追踪
+    cfg.rewards["gait_arm_tracking"] = RewardTermCfg(
+        func=reward_gait_arm_tracking,
+        weight=2.0,  # 给足正向诱惑，只要敢往前摆手就能拿大分
         params={
             "arm_pitch_names": ["zarm_l1_joint", "zarm_r1_joint"],
             "leg_pitch_names": ["leg_l3_joint", "leg_r3_joint"],
             "arm_default": 0.0,   
             "leg_default": -0.35, 
-            "gain": -1.5  # 核心映射参数
+            "gain": -1.5  # 保持 1.5 倍的放大系数，诱导它冲向负值区域
         },
     )
+
+    # 2. 引导保持屈肘
+    cfg.rewards["elbow_angle"] = RewardTermCfg(
+        func=reward_elbow_angle,
+        weight=1.0,  
+        params={
+            "elbow_names": ["zarm_l4_joint", "zarm_r4_joint"],
+            "target_angle": 1.2
+        },
+    )
+    
+    # 3. 半周期对称 (确保它依然在你现有的代码里)
+    # cfg.rewards["half_period_symmetry"] = RewardTermCfg(...)
+    # 半周期对称性可以保留 (它不影响位置，只管左右协调)
 
     cfg.rewards["half_period_symmetry"] = RewardTermCfg(
         func=reward_half_period_symmetry,
@@ -283,9 +328,9 @@ def kuavo_s45_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
         # 手臂
         r"zarm_[lr]1_joint.*": 1.0,   # [彻底解放] 让 arm_range 和 arm_symmetry 去管前后摆动
-        r"zarm_l2_joint.*": 0.0,    
-        r"zarm_r2_joint.*": 0.0,    
-        r"zarm_[lr]3_joint.*": 0.0, 
+        r"zarm_l2_joint.*": 0.001,    
+        r"zarm_r2_joint.*": 0.001,    
+        r"zarm_[lr]3_joint.*": 0.001, 
         r"zarm_[lr]4_joint.*": 0.0, 
         r"zarm_[lr]5_joint.*": 0.0, 
         r"zarm_[lr]6_joint.*": 0.0, 
@@ -306,9 +351,9 @@ def kuavo_s45_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
         # 手臂
         r"zarm_[lr]1_joint.*": 1.0,   # [彻底解放]
-        r"zarm_l2_joint.*": 0.0,
-        r"zarm_r2_joint.*": 0.0,    # (之前为-0.005的隐患已修复)
-        r"zarm_[lr]3_joint.*": 0.0,
+        r"zarm_l2_joint.*": 0.001,
+        r"zarm_r2_joint.*": 0.001,    # (之前为-0.005的隐患已修复)
+        r"zarm_[lr]3_joint.*": 0.001,
         r"zarm_[lr]4_joint.*": 0.0,
         r"zarm_[lr]5_joint.*": 0.0,
         r"zarm_[lr]6_joint.*": 0.0,

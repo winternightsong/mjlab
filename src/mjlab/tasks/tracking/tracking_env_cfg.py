@@ -59,12 +59,12 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "base_lin_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
-      params={"sensor_name": "robot/imu_lin_vel"},
+      params={"sensor_name": "robot/BodyVel"},
       noise=Unoise(n_min=-0.5, n_max=0.5),
     ),
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
-      params={"sensor_name": "robot/imu_ang_vel"},
+      params={"sensor_name": "robot/BodyGyro"},
       noise=Unoise(n_min=-0.2, n_max=0.2),
     ),
     "joint_pos": ObservationTermCfg(
@@ -95,10 +95,10 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       func=mdp.robot_body_ori_b, params={"command_name": "motion"}
     ),
     "base_lin_vel": ObservationTermCfg(
-      func=mdp.builtin_sensor, params={"sensor_name": "robot/imu_lin_vel"}
+      func=mdp.builtin_sensor, params={"sensor_name": "robot/BodyVel"}
     ),
     "base_ang_vel": ObservationTermCfg(
-      func=mdp.builtin_sensor, params={"sensor_name": "robot/imu_ang_vel"}
+      func=mdp.builtin_sensor, params={"sensor_name": "robot/BodyGyro"}
     ),
     "joint_pos": ObservationTermCfg(func=mdp.joint_pos_rel),
     "joint_vel": ObservationTermCfg(func=mdp.joint_vel_rel),

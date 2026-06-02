@@ -13,6 +13,29 @@ with best-in-class [MuJoCo](https://github.com/google-deepmind/mujoco_warp)
 physics to provide lightweight, modular abstractions for RL robotics research
 and sim-to-real deployment.
 
+ps:本版本fork过来之后，做了一些修改以适应乐聚kuavo s45机器人的动作模仿以及步态训练：基本命令如下：
+
+```bash
+uv run play Mjlab-Tracking-Flat-KUAVO-S45   --motion_file=/home/song/mjlab/motion/motion.npz   --checkpoint_file=/home/song/mjlab/logs/rsl_rl/kuavo_s45_tracking/2026-03-19_18-28-02/model_30000.pt
+```
+
+```bash
+uv run train Mjlab-Velocity-Flat-KUAVO-S45 --env.scene.num-envs 4096 --agent.max-iterations 6000
+```
+
+```bash
+uv run play Mjlab-Velocity-Flat-KUAVO-S45     --checkpoint-file /home/song/mjlab/logs/rsl_rl/s45_velocity/2026-03-17_14-58-48/model_5999.pt
+```
+
+```bash
+uv run train Mjlab-Tracking-Flat-KUAVO-S45   --env.commands.motion.motion_file /home/song/mjlab/motion/motion.npz   --env.scene.num_envs 768 --agent.max-iterations 60000
+```
+
+```bash
+uv run play Mjlab-Tracking-Flat-KUAVO-S45   --motion_file=/home/song/mjlab/motion/motion.npz   --checkpoint_file=/home/song/mjlab/logs/rsl_rl/kuavo_s45_tracking/2026-03-20_22-11-16/model_59999.pt
+```
+
+
 ---
 
 ## Quick Start

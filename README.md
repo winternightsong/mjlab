@@ -96,20 +96,48 @@ For full setup instructions, see the [Installation Guide](https://mujocolab.gith
 
 ## Training Examples
 
-### 1. Velocity Tracking
+### 1. Kuavo S45 Velocity Tracking
 
-Train a Unitree G1 humanoid to follow velocity commands on flat terrain:
+Train the Kuavo S45 humanoid on rough terrain:
 
 ```bash
-uv run train Mjlab-Velocity-Flat-Unitree-G1 --env.scene.num-envs 4096
+uv run train Mjlab-Velocity-Rough-KUAVO-S45 --env.scene.num-envs 1024
 ```
 
-**Multi-GPU Training:** Scale to multiple GPUs using `--gpu-ids`:
+For multi-GPU training:
 
 ```bash
-uv run train Mjlab-Velocity-Flat-Unitree-G1 \
-  --gpu-ids 0 1 \
-  --env.scene.num-envs 4096
+uv run train Mjlab-Velocity-Rough-KUAVO-S45 \
+  --gpu-ids 0 1 2 3 4 5 6 \
+  --env.scene.num-envs 1024
+```
+
+Flat-terrain evaluation:
+
+```bash
+uv run play Mjlab-Velocity-Flat-KUAVO-S45 --wandb-run-path your-org/mjlab/run-id
+```
+
+### 2. RPO Velocity Tracking
+
+Train the RPO humanoid on rough terrain:
+
+```bash
+uv run train Mjlab-Velocity-Rough-RPO --env.scene.num-envs 1024
+```
+
+For multi-GPU training:
+
+```bash
+uv run train Mjlab-Velocity-Rough-RPO \
+  --gpu-ids 0 1 2 3 4 5 6 \
+  --env.scene.num-envs 1024
+```
+
+Flat-terrain evaluation:
+
+```bash
+uv run play Mjlab-Velocity-Flat-RPO --wandb-run-path your-org/mjlab/run-id
 ```
 
 See the [Distributed Training guide](https://mujocolab.github.io/mjlab/source/distributed_training.html) for details.
@@ -122,9 +150,9 @@ uv run play Mjlab-Velocity-Flat-Unitree-G1 --wandb-run-path your-org/mjlab/run-i
 
 ---
 
-### 2. Motion Imitation
+### 3. Motion Imitation
 
-Train a Unitree G1 to mimic reference motions. mjlab uses
+Train Kuavo S45 or RPO to mimic reference motions. mjlab uses
 [WandB](https://wandb.ai) to manage reference motion datasets:
 
 1. **Create a registry collection** in your WandB workspace named `Motions`
@@ -151,9 +179,13 @@ Train a Unitree G1 to mimic reference motions. mjlab uses
 #### Train and Play
 
 ```bash
-uv run train Mjlab-Tracking-Flat-Unitree-G1 --registry-name your-org/motions/motion-name --env.scene.num-envs 4096
+uv run train Mjlab-Tracking-Flat-KUAVO-S45 --registry-name your-org/motions/motion-name --env.scene.num-envs 1024
 
-uv run play Mjlab-Tracking-Flat-Unitree-G1 --wandb-run-path your-org/mjlab/run-id
+uv run train Mjlab-Tracking-Flat-RPO --registry-name your-org/motions/motion-name --env.scene.num-envs 1024
+
+uv run play Mjlab-Tracking-Flat-KUAVO-S45 --wandb-run-path your-org/mjlab/run-id
+
+uv run play Mjlab-Tracking-Flat-RPO --wandb-run-path your-org/mjlab/run-id
 ```
 
 ---

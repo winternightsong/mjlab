@@ -7,6 +7,7 @@ from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.rl.runner import MjlabOnPolicyRunner
 from mjlab.tasks.tracking.rl.exporter import (
   attach_onnx_metadata,
+  export_deploy_policy_as_onnx,
   export_motion_policy_as_onnx,
 )
 
@@ -42,6 +43,13 @@ class MotionTrackingOnPolicyRunner(MjlabOnPolicyRunner):
       path=policy_path,
       filename=filename,
     )
+    deploy_filename = os.path.splitext(filename)[0] + "_deploy.onnx"
+    export_deploy_policy_as_onnx(
+      self.alg.policy,
+      normalizer=normalizer,
+      path=policy_path,
+      filename=deploy_filename,
+    )
     # Attach metadata (use "local" for run_path if not using wandb)
     run_name = wandb.run.name if self.logger_type == "wandb" and wandb.run else "local"
     attach_onnx_metadata(
@@ -50,8 +58,17 @@ class MotionTrackingOnPolicyRunner(MjlabOnPolicyRunner):
       path=policy_path,
       filename=filename,
     )
+    attach_onnx_metadata(
+      self.env.unwrapped,
+      run_name,  # type: ignore
+      path=policy_path,
+      filename=deploy_filename,
+    )
     if self.logger_type in ["wandb"]:
       wandb.save(policy_path + filename, base_path=os.path.dirname(policy_path))
+      wandb.save(
+        policy_path + deploy_filename, base_path=os.path.dirname(policy_path)
+      )
       # link the artifact registry to this run
       if self.registry_name is not None:
         wandb.run.use_artifact(self.registry_name)  # type: ignore

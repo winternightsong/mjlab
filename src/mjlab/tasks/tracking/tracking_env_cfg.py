@@ -47,20 +47,19 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     "command": ObservationTermCfg(
       func=mdp.generated_commands, params={"command_name": "motion"}
     ),
-    "motion_anchor_pos_b": ObservationTermCfg(
-      func=mdp.motion_anchor_pos_b,
+    "motion_target_height": ObservationTermCfg(
+      func=mdp.motion_target_height,
       params={"command_name": "motion"},
-      noise=Unoise(n_min=-0.25, n_max=0.25),
+      noise=Unoise(n_min=-0.02, n_max=0.02),
     ),
     "motion_anchor_ori_b": ObservationTermCfg(
       func=mdp.motion_anchor_ori_b,
       params={"command_name": "motion"},
       noise=Unoise(n_min=-0.05, n_max=0.05),
     ),
-    "base_lin_vel": ObservationTermCfg(
-      func=mdp.builtin_sensor,
-      params={"sensor_name": "robot/BodyVel"},
-      noise=Unoise(n_min=-0.5, n_max=0.5),
+    "projected_gravity": ObservationTermCfg(
+      func=mdp.projected_gravity,
+      noise=Unoise(n_min=-0.05, n_max=0.05),
     ),
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,

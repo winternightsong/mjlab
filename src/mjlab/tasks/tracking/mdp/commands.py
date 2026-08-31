@@ -73,10 +73,21 @@ class MotionCommand(CommandTerm):
       dtype=torch.long,
       device=self.device,
     )
+    joint_names = self.cfg.joint_names or self.robot.joint_names
+    self.joint_indexes = torch.tensor(
+      self.robot.find_joints(joint_names, preserve_order=True)[0],
+      dtype=torch.long,
+      device=self.device,
+    )
 
     self.motion = MotionLoader(
       self.cfg.motion_file, self.body_indexes, device=self.device
     )
+    if self.motion.joint_pos.shape[1] != len(self.joint_indexes):
+      raise ValueError(
+        "Motion joint count does not match configured policy joints: "
+        f"{self.motion.joint_pos.shape[1]} != {len(self.joint_indexes)}"
+      )
     self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
     self.body_pos_relative_w = torch.zeros(
       self.num_envs, len(cfg.body_names), 3, device=self.device
@@ -170,11 +181,11 @@ class MotionCommand(CommandTerm):
 
   @property
   def robot_joint_pos(self) -> torch.Tensor:
-    return self.robot.data.joint_pos
+    return self.robot.data.joint_pos[:, self.joint_indexes]
 
   @property
   def robot_joint_vel(self) -> torch.Tensor:
-    return self.robot.data.joint_vel
+    return self.robot.data.joint_vel[:, self.joint_indexes]
 
   @property
   def robot_body_pos_w(self) -> torch.Tensor:
@@ -269,6 +280,21 @@ class MotionCommand(CommandTerm):
 
     sampling_probabilities = sampling_probabilities / sampling_probabilities.sum()
 
+    # Blend toward uniform only as much as needed to enforce the configured cap.
+    # This keeps the relative adaptive priorities while preventing one difficult
+    # segment from monopolizing the rollout batch.
+    uniform_probability = 1.0 / self.bin_count
+    max_probability = max(self.cfg.adaptive_max_probability, uniform_probability)
+    current_max = sampling_probabilities.max()
+    if current_max > max_probability:
+      blend = (current_max - max_probability) / (
+        current_max - uniform_probability
+      )
+      sampling_probabilities = (
+        (1.0 - blend) * sampling_probabilities
+        + blend * torch.full_like(sampling_probabilities, uniform_probability)
+      )
+
     sampled_bins = torch.multinomial(
       sampling_probabilities, len(env_ids), replacement=True
     )
@@ -341,12 +367,23 @@ class MotionCommand(CommandTerm):
       size=joint_pos.shape,
       device=joint_pos.device,  # type: ignore
     )
-    soft_joint_pos_limits = self.robot.data.soft_joint_pos_limits[env_ids]
+    all_soft_joint_pos_limits = self.robot.data.soft_joint_pos_limits
+    if all_soft_joint_pos_limits.shape[0] == 1:
+      soft_joint_pos_limits = all_soft_joint_pos_limits[
+        :, self.joint_indexes
+      ].expand(len(env_ids), -1, -1)
+    else:
+      soft_joint_pos_limits = all_soft_joint_pos_limits[
+        env_ids[:, None], self.joint_indexes
+      ]
     joint_pos[env_ids] = torch.clip(
       joint_pos[env_ids], soft_joint_pos_limits[:, :, 0], soft_joint_pos_limits[:, :, 1]
     )
     self.robot.write_joint_state_to_sim(
-      joint_pos[env_ids], joint_vel[env_ids], env_ids=env_ids
+      joint_pos[env_ids],
+      joint_vel[env_ids],
+      joint_ids=self.joint_indexes,
+      env_ids=env_ids,
     )
 
     root_state = torch.cat(
@@ -419,7 +456,9 @@ class MotionCommand(CommandTerm):
         qpos = np.zeros(self._env.sim.mj_model.nq)
         qpos[free_joint_q_adr[0:3]] = self.body_pos_w[batch, 0].cpu().numpy()
         qpos[free_joint_q_adr[3:7]] = self.body_quat_w[batch, 0].cpu().numpy()
-        qpos[joint_q_adr] = self.joint_pos[batch].cpu().numpy()
+        qpos[joint_q_adr[self.joint_indexes.cpu().numpy()]] = (
+          self.joint_pos[batch].cpu().numpy()
+        )
 
         visualizer.add_ghost_mesh(qpos, model=self._ghost_model, label=f"ghost_{batch}")
 
@@ -476,6 +515,7 @@ class MotionCommandCfg(CommandTermCfg):
   anchor_body_name: str
   body_names: tuple[str, ...]
   entity_name: str
+  joint_names: tuple[str, ...] = ()
   pose_range: dict[str, tuple[float, float]] = field(default_factory=dict)
   velocity_range: dict[str, tuple[float, float]] = field(default_factory=dict)
   joint_position_range: tuple[float, float] = (-0.52, 0.52)
@@ -483,6 +523,7 @@ class MotionCommandCfg(CommandTermCfg):
   adaptive_lambda: float = 0.8
   adaptive_uniform_ratio: float = 0.1
   adaptive_alpha: float = 0.001
+  adaptive_max_probability: float = 1.0
   sampling_mode: Literal["adaptive", "uniform", "start"] = "adaptive"
 
   @dataclass

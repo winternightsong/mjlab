@@ -28,6 +28,16 @@ def motion_anchor_pos_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tens
   return pos.view(env.num_envs, -1)
 
 
+def motion_target_height(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+  """Return the reference anchor's absolute height.
+
+  This matches LejuLab Deploy's ``motion_target_height`` term, which reads the
+  Z component of ``body_pos`` from the current motion-data row.
+  """
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+  return command.anchor_pos_w[:, 2:3]
+
+
 def motion_anchor_ori_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
 

@@ -26,6 +26,18 @@ def export_motion_policy_as_onnx(
   policy_exporter.export(path, filename)
 
 
+def export_deploy_policy_as_onnx(
+  actor_critic: object,
+  path: str,
+  normalizer: object | None = None,
+  filename: str = "policy_deploy.onnx",
+  verbose: bool = False,
+) -> None:
+  """Export the single-input/single-output model expected by LejuLab Deploy."""
+  os.makedirs(path, exist_ok=True)
+  _OnnxPolicyExporter(actor_critic, normalizer, verbose).export(path, filename)
+
+
 class _OnnxMotionPolicyExporter(_OnnxPolicyExporter):
   def __init__(
     self, env: ManagerBasedRlEnv, actor_critic, normalizer=None, verbose=False
@@ -105,6 +117,19 @@ def attach_onnx_metadata(
     {
       "anchor_body_name": motion_term_cfg.anchor_body_name,
       "body_names": list(motion_term_cfg.body_names),
+      "deploy_controller": "RLMimicController",
+      "deploy_observation_terms": [
+        "motion_command",
+        "motion_target_height",
+        "motion_anchor_ori_b",
+        "projected_gravity",
+        "base_ang_vel",
+        "joint_pos",
+        "joint_vel",
+        "actions",
+      ],
+      "deploy_history_length": 1,
+      "deploy_residual_action": False,
     }
   )
 

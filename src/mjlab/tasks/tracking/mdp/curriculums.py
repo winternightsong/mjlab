@@ -20,19 +20,19 @@ class RealRobotRandomizationCurriculum:
   def __call__(self, env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> dict[str, float]:
     del env_ids
     iteration = env.common_step_counter // self.rollout_steps
-    stage = max(0, min(4, (iteration - self.start_iteration) // self.iterations_per_stage))
+    stage = max(0, min(3, (iteration - self.start_iteration) // self.iterations_per_stage))
     if stage != self._stage:
       self._apply_stage(env, stage)
       self._stage = stage
     return {"stage": float(stage), "iteration": float(iteration)}
 
   def _apply_stage(self, env: ManagerBasedRlEnv, stage: int) -> None:
-    scales = (0.25, 0.45, 0.65, 0.85, 1.0)
+    scales = (0.25, 0.50, 0.75, 1.0)
     scale = scales[stage]
 
-    push_xy = (0.08, 0.14, 0.20, 0.26, 0.30)[stage]
+    push_xy = (0.08, 0.16, 0.23, 0.30)[stage]
     push_term = env.event_manager.get_term_cfg("push_robot")
-    push_term.interval_range_s = ((8, 12), (6, 10), (5, 8), (4, 7), (3, 6))[stage]
+    push_term.interval_range_s = ((8, 12), (6, 9), (4.5, 7.5), (3, 6))[stage]
     push_term.params["velocity_range"] = {
       "x": (-push_xy, push_xy), "y": (-push_xy, push_xy),
       "z": (-0.12 * scale, 0.12 * scale),
@@ -41,20 +41,20 @@ class RealRobotRandomizationCurriculum:
       "yaw": (-0.6 * scale, 0.6 * scale),
     }
 
-    com_xy = (0.005, 0.009, 0.013, 0.017, 0.02)[stage]
-    com_z = (0.008, 0.013, 0.019, 0.025, 0.03)[stage]
+    com_xy = (0.005, 0.01, 0.015, 0.02)[stage]
+    com_z = (0.008, 0.015, 0.023, 0.03)[stage]
     com_term = env.event_manager.get_term_cfg("base_com")
     com_term.params["ranges"] = {
       0: (-com_xy, com_xy), 1: (-com_xy, com_xy), 2: (-com_z, com_z)
     }
     com_term.func(env, None, **com_term.params)
 
-    friction = ((0.75, 0.9), (0.65, 0.95), (0.55, 1.0), (0.5, 1.0), (0.45, 1.0))[stage]
+    friction = ((0.75, 0.9), (0.62, 0.95), (0.52, 1.0), (0.45, 1.0))[stage]
     friction_term = env.event_manager.get_term_cfg("foot_friction")
     friction_term.params["ranges"] = friction
     friction_term.func(env, None, **friction_term.params)
 
-    gain = (0.03, 0.06, 0.09, 0.12, 0.15)[stage]
+    gain = (0.03, 0.07, 0.11, 0.15)[stage]
     gain_term = env.event_manager.get_term_cfg("pd_gains")
     gain_term.params["kp_range"] = (1.0 - gain, 1.0 + gain)
     gain_term.params["kd_range"] = (1.0 - gain, 1.0 + gain)
@@ -64,11 +64,11 @@ class RealRobotRandomizationCurriculum:
     encoder.params["bias_range"] = (-0.01 * scale, 0.01 * scale)
     encoder.func(env, None, **encoder.params)
 
-    joint = (0.02, 0.028, 0.035, 0.043, 0.05)[stage]
+    joint = (0.02, 0.03, 0.04, 0.05)[stage]
     motion_term = env.command_manager.get_term("motion")
     motion_term.cfg.joint_position_range = (-joint, joint)
 
-    motor_ranges = ((0, 2), (2, 4), (4, 7), (6, 10), (8, 12))
+    motor_ranges = ((0, 2), (2, 5), (5, 9), (8, 12))
     motor_min, motor_max = motor_ranges[stage]
     robot = env.scene["robot"]
     for actuator in robot.actuators:
@@ -77,7 +77,7 @@ class RealRobotRandomizationCurriculum:
         lags = torch.randint(motor_min, motor_max + 1, (env.num_envs,), device=env.device)
         buffer.set_lags(lags)
 
-    observation_lags = ((0, 0), (0, 1), (1, 1), (1, 2), (2, 3))
+    observation_lags = ((0, 0), (0, 1), (1, 2), (2, 3))
     obs_min, obs_max = observation_lags[stage]
     manager = env.observation_manager
     for term_name in ("projected_gravity", "base_ang_vel", "joint_pos", "joint_vel"):

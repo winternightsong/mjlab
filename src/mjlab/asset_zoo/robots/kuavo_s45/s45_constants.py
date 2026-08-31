@@ -223,17 +223,17 @@ HOME_KEYFRAME = EntityCfg.InitialStateCfg(
         # 腿部 - 直立姿态
         r"leg_[lr]1_joint": 0.0,      # Hip roll
         r"leg_[lr]2_joint": 0.0,      # Hip yaw
-        r"leg_[lr]3_joint": -0.1,     # Hip pitch
-        r"leg_[lr]4_joint": 0.3,      # Knee
-        r"leg_[lr]5_joint": -0.15,    # Ankle pitch
+        r"leg_[lr]3_joint": -0.27,    # Hip pitch (LejuLab S46 default)
+        r"leg_[lr]4_joint": 0.52,     # Knee
+        r"leg_[lr]5_joint": -0.3,     # Ankle pitch
         r"leg_[lr]6_joint": 0.0,      # Ankle roll
 
         # 手臂 - 自然下垂姿态
-        r"zarm_[lr]1_joint": 0.0,     # Arm pitch0.3
-        r"zarm_l2_joint": 0.2,        # Left arm roll
-        r"zarm_r2_joint": -0.2,       # Right arm roll (负值！)
+        r"zarm_[lr]1_joint": 0.26,    # Arm pitch (LejuLab S46 default)
+        r"zarm_l2_joint": 0.0,        # Left arm roll
+        r"zarm_r2_joint": 0.0,        # Right arm roll
         r"zarm_[lr]3_joint": 0.0,     # Arm yaw
-        r"zarm_[lr]4_joint": -0.5,    # Elbow
+        r"zarm_[lr]4_joint": -0.52,   # Elbow
         r"zarm_[lr]5_joint": 0.0,     # Hand yaw
         r"zarm_l6_joint": 0.0,        # Left wrist roll
         r"zarm_r6_joint": 0.0,        # Right wrist roll

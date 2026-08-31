@@ -637,6 +637,15 @@ def _sample_distribution(
     raise ValueError(f"Unknown distribution: {distribution}")
 
 
+def register_domain_randomization_field(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  field: str,
+) -> None:
+  """Register a model field for per-environment expansion without changing it."""
+  del env, env_ids, field
+
+
 def randomize_pd_gains(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None,
@@ -682,7 +691,10 @@ def randomize_pd_gains(
 
   # Unwrap DelayedActuators to access base actuators.
   actuators = [
-    a.base_actuator if isinstance(a, DelayedActuator) else a for a in actuators
+    a.base_actuator
+    if isinstance(a, DelayedActuator) or hasattr(a, "base_actuator")
+    else a
+    for a in actuators
   ]
 
   for actuator in actuators:

@@ -1,17 +1,23 @@
 """kuavo S45 flat tracking environment configurations (Corrected for S45 XML)."""
 
-from mjlab.asset_zoo.robots import (
-    S45_ACTION_SCALE,
-    get_s45_robot_cfg,
-)
+import copy
+
+from mjlab.asset_zoo.robots import get_s45_robot_cfg
+from mjlab.actuator import DelayedActuatorCfg
 # 注意：你需要确保从对应的 S45 constants 文件中导入 FULL_COLLISION
 from mjlab.asset_zoo.robots.kuavo_s45.s45_constants import FULL_COLLISION 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
+from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg
+from mjlab.managers.reward_manager import RewardTermCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
+from mjlab.tasks.tracking import mdp
+from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
 
 def kuavo_s45_flat_tracking_env_cfg(
@@ -21,13 +27,22 @@ def kuavo_s45_flat_tracking_env_cfg(
     """Create kuavo S45 flat terrain tracking configuration."""
     cfg = make_tracking_env_cfg()
 
-    # ... (之前的 robot 实体加载逻辑保持不变) ...
+    robot_cfg = copy.deepcopy(get_s45_robot_cfg())
+    robot_cfg.articulation.actuators = tuple(
+        DelayedActuatorCfg(
+            base_cfg=actuator_cfg,
+            delay_target="position",
+            delay_min_lag=0,
+            delay_max_lag=12,
+            delay_hold_prob=0.9,
+            delay_update_period=20,
+            delay_per_env_phase=True,
+        )
+        for actuator_cfg in robot_cfg.articulation.actuators
+    )
     if play:
-        robot_cfg = get_s45_robot_cfg()
         robot_cfg.collisions = (FULL_COLLISION,)
-        cfg.scene.entities = {"robot": robot_cfg}
-    else:
-        cfg.scene.entities = {"robot": get_s45_robot_cfg()}
+    cfg.scene.entities = {"robot": robot_cfg}
 
     # ... (传感器配置保持不变) ...
 
@@ -41,6 +56,33 @@ def kuavo_s45_flat_tracking_env_cfg(
         "asset_cfg"
     ].geom_names = r"^(left|right)_foot_col[1-7]$"
 
+    cfg.events["push_robot"].interval_range_s = (8.0, 12.0)
+    cfg.events["push_robot"].params["velocity_range"] = {
+        "x": (-0.08, 0.08), "y": (-0.08, 0.08), "z": (-0.03, 0.03),
+        "roll": (-0.1, 0.1), "pitch": (-0.1, 0.1), "yaw": (-0.15, 0.15),
+    }
+    cfg.events["base_com"].params["ranges"] = {
+        0: (-0.005, 0.005), 1: (-0.005, 0.005), 2: (-0.008, 0.008),
+    }
+    cfg.events["foot_friction"].params["ranges"] = (0.75, 0.9)
+    cfg.events["encoder_bias"].params["bias_range"] = (-0.0025, 0.0025)
+    for field in ("actuator_gainprm", "actuator_biasprm"):
+        cfg.events[f"expand_{field}"] = EventTermCfg(
+            func=mdp.register_domain_randomization_field,
+            mode="startup",
+            domain_randomization=True,
+            params={"field": field},
+        )
+    cfg.events["pd_gains"] = EventTermCfg(
+        func=mdp.randomize_pd_gains,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "kp_range": (0.97, 1.03), "kd_range": (0.97, 1.03),
+            "distribution": "uniform", "operation": "scale",
+        },
+    )
+
     # [修正] 同样检查其他的随机初始化事件（如果存在的话）
     if "reset_robot_offset" in cfg.events:
          cfg.events["reset_robot_offset"].params[
@@ -53,6 +95,26 @@ def kuavo_s45_flat_tracking_env_cfg(
     motion_cmd = cfg.commands["motion"]
     assert isinstance(motion_cmd, MotionCommandCfg)
     motion_cmd.anchor_body_name = "base_link"
+    policy_joint_names = tuple(
+        [f"leg_l{i}_joint" for i in range(1, 7)]
+        + [f"leg_r{i}_joint" for i in range(1, 7)]
+        + [f"zarm_l{i}_joint" for i in range(1, 8)]
+        + [f"zarm_r{i}_joint" for i in range(1, 8)]
+    )
+    motion_cmd.joint_names = policy_joint_names
+    motion_cmd.joint_position_range = (-0.02, 0.02)
+    motion_cmd.adaptive_max_probability = 1.0
+    cfg.rewards["motion_joint_pos"] = RewardTermCfg(
+        func=mdp.motion_joint_position_error_exp,
+        weight=0.4,
+        params={"command_name": "motion", "std": 0.5},
+    )
+    cfg.rewards["motion_joint_vel"] = RewardTermCfg(
+        func=mdp.motion_joint_velocity_error_exp,
+        weight=0.15,
+        params={"command_name": "motion", "std": 3.0},
+    )
+    cfg.rewards["action_rate_l2"].weight = -0.05
     
     motion_cmd.body_names = (
         "base_link", "leg_l1_link", "leg_l4_link", "leg_l6_link",
@@ -86,6 +148,51 @@ def kuavo_s45_flat_tracking_env_cfg(
         fields=("found",),
     )
     cfg.scene.sensors = (self_collision_cfg,)
+
+    # LejuLab Deploy's KUAVO configuration uses a 0.5 position offset scale.
+    # Keep residual_action=false there to match use_default_offset=True here.
+    joint_pos_action = cfg.actions["joint_pos"]
+    assert isinstance(joint_pos_action, JointPositionActionCfg)
+    joint_pos_action.actuator_names = (r"^(leg|zarm)_.*",)
+    joint_pos_action.scale = 0.5
+
+    policy_asset_cfg = SceneEntityCfg("robot", joint_names=policy_joint_names)
+    for group_name in ("policy", "critic"):
+        for term_name in ("joint_pos", "joint_vel"):
+            cfg.observations[group_name].terms[term_name].params["asset_cfg"] = (
+                policy_asset_cfg
+            )
+
+    policy_obs = cfg.observations["policy"]
+    policy_obs.enable_corruption = True
+    final_noise = {
+        "motion_target_height": 0.01,
+        "motion_anchor_ori_b": 0.025,
+        "projected_gravity": 0.025,
+        "base_ang_vel": 0.08,
+        "joint_pos": 0.01,
+        "joint_vel": 0.2,
+    }
+    for term_name, magnitude in final_noise.items():
+        if term_name in policy_obs.terms:
+            initial = magnitude * 0.25
+            policy_obs.terms[term_name].noise = Unoise(n_min=-initial, n_max=initial)
+    for term_name in ("projected_gravity", "base_ang_vel", "joint_pos", "joint_vel"):
+        term = policy_obs.terms[term_name]
+        term.delay_min_lag = 0
+        term.delay_max_lag = 3
+        term.delay_hold_prob = 0.9
+        term.delay_update_period = 5
+        term.delay_per_env = True
+        term.delay_per_env_phase = True
+
+    cfg.curriculum["real_robot_randomization"] = CurriculumTermCfg(
+        func=mdp.RealRobotRandomizationCurriculum(
+            start_iteration=17500,
+            iterations_per_stage=5000,
+            rollout_steps=24,
+        )
+    )
 
     # 观测名称修正
     cfg.observations["policy"].terms["base_ang_vel"].params["sensor_name"] = "robot/BodyGyro"

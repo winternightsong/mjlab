@@ -34,26 +34,25 @@ def get_base_metadata(
   robot: Entity = env.scene["robot"]
   joint_action = env.action_manager.get_term("joint_pos")
   assert isinstance(joint_action, JointPositionAction)
-  # Build mapping from joint name to actuator ID for natural joint order.
+  # Build mapping from joint name to actuator ID for the policy joint order.
   # Each spec actuator controls exactly one joint (via its target field).
   joint_name_to_ctrl_id = {}
   for actuator in robot.spec.actuators:
     joint_name = actuator.target.split("/")[-1]
     joint_name_to_ctrl_id[joint_name] = actuator.id
   # Get actuator IDs in natural joint order (same order as robot.joint_names).
-  ctrl_ids_natural = [
-    joint_name_to_ctrl_id[jname]
-    for jname in robot.joint_names  # global joint order
-    if jname in joint_name_to_ctrl_id  # skip non-actuated joints
-  ]
-  joint_stiffness = env.sim.mj_model.actuator_gainprm[ctrl_ids_natural, 0]
-  joint_damping = -env.sim.mj_model.actuator_biasprm[ctrl_ids_natural, 2]
+  policy_joint_names = joint_action.target_names
+  ctrl_ids = [joint_name_to_ctrl_id[jname] for jname in policy_joint_names]
+  joint_stiffness = env.sim.mj_model.actuator_gainprm[ctrl_ids, 0]
+  joint_damping = -env.sim.mj_model.actuator_biasprm[ctrl_ids, 2]
   return {
     "run_path": run_path,
-    "joint_names": list(robot.joint_names),
+    "joint_names": list(policy_joint_names),
     "joint_stiffness": joint_stiffness.tolist(),
     "joint_damping": joint_damping.tolist(),
-    "default_joint_pos": robot.data.default_joint_pos[0].cpu().tolist(),
+    "default_joint_pos": robot.data.default_joint_pos[
+      0, joint_action.target_ids
+    ].cpu().tolist(),
     "command_names": list(env.command_manager.active_terms),
     "observation_names": env.observation_manager.active_terms["policy"],
     "action_scale": joint_action._scale[0].cpu().tolist()

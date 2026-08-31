@@ -143,7 +143,11 @@ class Simulation:
     # MJWarp model and data.
     with wp.ScopedDevice(self.wp_device):
       self._wp_model = mjwarp.put_model(self._mj_model)
-      self._wp_model.opt.ls_parallel = cfg.ls_parallel
+      try:
+        self._wp_model.opt.ls_parallel = cfg.ls_parallel
+      except AttributeError:
+        # Removed in MuJoCo Warp 3.9.1; newer versions select this internally.
+        pass
       self._wp_model.opt.contact_sensor_maxmatch = cfg.contact_sensor_maxmatch
 
       self._wp_data = mjwarp.put_data(
@@ -296,7 +300,15 @@ class Simulation:
     if not self.wp_device.is_cuda:
       return False
 
-    driver_ver = wp.context.runtime.driver_version
+    if hasattr(wp, "get_cuda_driver_version"):
+      version_int = wp.get_cuda_driver_version()
+      driver_ver = (
+        version_int
+        if isinstance(version_int, tuple)
+        else (version_int // 1000, (version_int % 1000) // 10)
+      )
+    else:
+      driver_ver = wp.context.runtime.driver_version
     has_mempool = wp.is_mempool_enabled(self.wp_device)
 
     if driver_ver is None:

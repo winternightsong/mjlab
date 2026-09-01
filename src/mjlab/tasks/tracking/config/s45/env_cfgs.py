@@ -130,6 +130,32 @@ def kuavo_s45_flat_tracking_env_cfg(
     cfg.terminations["ee_body_pos"].params["body_names"] = (
         "leg_l6_link", "leg_r6_link", "zarm_l7_link", "zarm_r7_link",
     )
+    cfg.terminations["ee_body_pos"].params["ignored_time_range_s"] = (78.0, 82.0)
+    cfg.terminations["ee_body_pos"].params["motion_fps"] = 50.0
+
+    hard_segment_params = {
+        "hard_segment_s": (78.0, 82.0),
+        "hard_scale": 0.6,
+        "recovery_s": 2.0,
+        "motion_fps": 50.0,
+    }
+    for reward_name in (
+        "motion_global_root_pos", "motion_global_root_ori",
+        "motion_body_pos", "motion_body_ori",
+        "motion_body_lin_vel", "motion_body_ang_vel",
+        "motion_joint_pos", "motion_joint_vel",
+    ):
+        cfg.rewards[reward_name].params.update(hard_segment_params)
+    cfg.rewards["motion_recovery"] = RewardTermCfg(
+        func=mdp.motion_recovery_tracking_reward,
+        weight=0.5,
+        params={
+            "command_name": "motion",
+            "hard_segment_end_s": 82.0,
+            "recovery_s": 2.0,
+            "motion_fps": 50.0,
+        },
+    )
 
     # ========================================
     # [优化] 显存平衡配置

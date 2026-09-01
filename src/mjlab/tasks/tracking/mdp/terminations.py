@@ -82,6 +82,8 @@ def bad_motion_body_pos_z_only(
   command_name: str,
   threshold: float,
   body_names: tuple[str, ...] | None = None,
+  ignored_time_range_s: tuple[float, float] | None = None,
+  motion_fps: float = 50.0,
 ) -> torch.Tensor:
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
 
@@ -90,4 +92,9 @@ def bad_motion_body_pos_z_only(
     command.body_pos_relative_w[:, body_indexes, -1]
     - command.robot_body_pos_w[:, body_indexes, -1]
   )
-  return torch.any(error > threshold, dim=-1)
+  terminated = torch.any(error > threshold, dim=-1)
+  if ignored_time_range_s is not None:
+    time_s = command.time_steps.float() / motion_fps
+    start_s, end_s = ignored_time_range_s
+    terminated &= ~((time_s >= start_s) & (time_s <= end_s))
+  return terminated

@@ -75,7 +75,10 @@ def kuavo_s45_flat_tracking_env_cfg(
     }
     cfg.events["foot_friction"].params["ranges"] = (0.75, 0.9)
     cfg.events["encoder_bias"].params["bias_range"] = (-0.0025, 0.0025)
-    for field in ("actuator_gainprm", "actuator_biasprm"):
+    for field in (
+        "actuator_gainprm", "actuator_biasprm", "body_mass",
+        "dof_frictionloss", "dof_armature",
+    ):
         cfg.events[f"expand_{field}"] = EventTermCfg(
             func=mdp.register_domain_randomization_field,
             mode="startup",
@@ -89,6 +92,57 @@ def kuavo_s45_flat_tracking_env_cfg(
             "asset_cfg": SceneEntityCfg("robot"),
             "kp_range": (0.97, 1.03), "kd_range": (0.97, 1.03),
             "distribution": "uniform", "operation": "scale",
+        },
+    )
+    link_bodies = r"^(leg_[lr][1-6]_link|zarm_[lr][1-7]_link)$"
+    cfg.events["base_mass"] = EventTermCfg(
+        func=mdp.randomize_field,
+        mode="startup",
+        domain_randomization=True,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=("base_link",)),
+            "field": "body_mass", "ranges": (0.95, 1.05), "operation": "scale",
+        },
+    )
+    cfg.events["link_mass"] = EventTermCfg(
+        func=mdp.randomize_field,
+        mode="startup",
+        domain_randomization=True,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=link_bodies),
+            "field": "body_mass", "ranges": (0.95, 1.05), "operation": "scale",
+        },
+    )
+    cfg.events["link_com"] = EventTermCfg(
+        func=mdp.randomize_field,
+        mode="startup",
+        domain_randomization=True,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=link_bodies),
+            "field": "body_ipos",
+            "ranges": {0: (-0.01, 0.01), 1: (-0.01, 0.01), 2: (-0.01, 0.01)},
+            "operation": "add",
+        },
+    )
+    all_policy_joints = r"^(leg|zarm)_.*_joint$"
+    cfg.events["joint_friction"] = EventTermCfg(
+        func=mdp.randomize_field,
+        mode="startup",
+        domain_randomization=True,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=all_policy_joints),
+            "field": "dof_frictionloss", "ranges": (0.95, 1.05),
+            "operation": "scale",
+        },
+    )
+    cfg.events["joint_armature"] = EventTermCfg(
+        func=mdp.randomize_field,
+        mode="startup",
+        domain_randomization=True,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=all_policy_joints),
+            "field": "dof_armature", "ranges": (0.9, 1.1),
+            "operation": "scale",
         },
     )
 

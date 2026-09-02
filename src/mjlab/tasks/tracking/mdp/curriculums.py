@@ -43,6 +43,30 @@ class RealRobotRandomizationCurriculum:
     friction_term.params["ranges"] = friction
     friction_term.func(env, None, **friction_term.params)
 
+    base_mass = ((0.95, 1.05), (0.9, 1.15), (0.85, 1.3), (0.8, 1.5))[stage]
+    link_mass = ((0.95, 1.05), (0.9, 1.1), (0.85, 1.15), (0.8, 1.2))[stage]
+    for term_name, ranges in (("base_mass", base_mass), ("link_mass", link_mass)):
+      term = env.event_manager.get_term_cfg(term_name)
+      term.params["ranges"] = ranges
+      term.func(env, None, **term.params)
+
+    link_com = (0.01, 0.02, 0.03, 0.04)[stage]
+    link_com_term = env.event_manager.get_term_cfg("link_com")
+    link_com_term.params["ranges"] = {
+      0: (-link_com, link_com), 1: (-link_com, link_com),
+      2: (-link_com, link_com),
+    }
+    link_com_term.func(env, None, **link_com_term.params)
+
+    joint_friction = ((0.95, 1.05), (0.9, 1.1), (0.85, 1.15), (0.8, 1.2))[stage]
+    joint_armature = ((0.9, 1.1), (0.75, 1.25), (0.6, 1.4), (0.5, 1.5))[stage]
+    for term_name, ranges in (
+      ("joint_friction", joint_friction), ("joint_armature", joint_armature)
+    ):
+      term = env.event_manager.get_term_cfg(term_name)
+      term.params["ranges"] = ranges
+      term.func(env, None, **term.params)
+
     gain = (0.03, 0.07, 0.11, 0.15)[stage]
     gain_term = env.event_manager.get_term_cfg("pd_gains")
     gain_term.params["kp_range"] = (1.0 - gain, 1.0 + gain)

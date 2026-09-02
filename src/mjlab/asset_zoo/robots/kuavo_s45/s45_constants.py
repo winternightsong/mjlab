@@ -93,7 +93,7 @@ DAMPING_TINY = 2.0 * DAMPING_RATIO * ARMATURE_TINY * NATURAL_FREQ
 # --- 腿部执行器 ---
 S45_ACTUATOR_HIP_ROLL = BuiltinPositionActuatorCfg(
     target_names_expr=(r"leg_[lr]1_joint",),  
-    stiffness=STIFFNESS_LARGE,
+    stiffness=100.0,
     damping=DAMPING_LARGE,
     effort_limit=180.0,
     armature=ARMATURE_LARGE,
@@ -101,7 +101,7 @@ S45_ACTUATOR_HIP_ROLL = BuiltinPositionActuatorCfg(
 
 S45_ACTUATOR_HIP_YAW = BuiltinPositionActuatorCfg(
     target_names_expr=(r"leg_[lr]2_joint",),
-    stiffness=STIFFNESS_MEDIUM,
+    stiffness=100.0,
     damping=DAMPING_MEDIUM,
     effort_limit=100.0,
     armature=ARMATURE_MEDIUM,
@@ -109,7 +109,7 @@ S45_ACTUATOR_HIP_YAW = BuiltinPositionActuatorCfg(
 
 S45_ACTUATOR_HIP_PITCH = BuiltinPositionActuatorCfg(
     target_names_expr=(r"leg_[lr]3_joint",),
-    stiffness=STIFFNESS_MEDIUM,
+    stiffness=100.0,
     damping=DAMPING_MEDIUM,
     effort_limit=100.0,
     armature=ARMATURE_MEDIUM,
@@ -117,7 +117,7 @@ S45_ACTUATOR_HIP_PITCH = BuiltinPositionActuatorCfg(
 
 S45_ACTUATOR_KNEE = BuiltinPositionActuatorCfg(
     target_names_expr=(r"leg_[lr]4_joint",),
-    stiffness=STIFFNESS_LARGE,
+    stiffness=150.0,
     damping=DAMPING_LARGE,
     effort_limit=180.0,
     armature=ARMATURE_LARGE,
@@ -125,7 +125,7 @@ S45_ACTUATOR_KNEE = BuiltinPositionActuatorCfg(
 
 S45_ACTUATOR_ANKLE_PITCH = BuiltinPositionActuatorCfg(
     target_names_expr=(r"leg_[lr]5_joint",),
-    stiffness=STIFFNESS_SMALL,
+    stiffness=40.0,
     damping=DAMPING_SMALL,
     effort_limit=50.0,
     armature=ARMATURE_SMALL,
@@ -133,7 +133,7 @@ S45_ACTUATOR_ANKLE_PITCH = BuiltinPositionActuatorCfg(
 
 S45_ACTUATOR_ANKLE_ROLL = BuiltinPositionActuatorCfg(
     target_names_expr=(r"leg_[lr]6_joint",),
-    stiffness=STIFFNESS_SMALL,
+    stiffness=40.0,
     damping=DAMPING_SMALL,
     effort_limit=50.0,
     armature=ARMATURE_SMALL,

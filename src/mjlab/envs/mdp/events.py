@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Dict, Literal, Tuple
 import torch
 
 from mjlab.entity import Entity, EntityIndexing
+from mjlab.managers import ManagerTermBase
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.utils.lab_api.math import (
   quat_from_euler_xyz,
@@ -346,6 +347,57 @@ def apply_external_force_torque(
   asset.write_external_wrench_to_sim(
     forces, torques, env_ids=env_ids, body_ids=asset_cfg.body_ids
   )
+
+
+class ScheduledExternalForcePulse(ManagerTermBase):
+  """Apply one single-control-step force pulse during each normal episode."""
+
+  def __init__(self, cfg, env: ManagerBasedRlEnv):
+    del cfg
+    super().__init__(env)
+    self._trigger_steps = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+
+  def reset(self, env_ids: torch.Tensor | slice | None) -> None:
+    if env_ids is None:
+      env_ids = slice(None)
+    count = self.num_envs if isinstance(env_ids, slice) else len(env_ids)
+    # The 10 s episode contains 500 control steps. Trigger between 1 and 8 s,
+    # leaving enough time to observe recovery while avoiding reset transients.
+    self._trigger_steps[env_ids] = torch.randint(
+      50, 401, (count,), device=self.device
+    )
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    force_range: dict[str, tuple[float, float]],
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  ) -> None:
+    asset: Entity = env.scene[asset_cfg.name]
+    body_ids = asset_cfg.body_ids
+    num_bodies = len(body_ids) if isinstance(body_ids, list) else asset.num_bodies
+    zeros = torch.zeros((len(env_ids), num_bodies, 3), device=env.device)
+    # Clear the previous step first, so a pulse cannot persist in MuJoCo.
+    asset.write_external_wrench_to_sim(
+      zeros, zeros, env_ids=env_ids, body_ids=body_ids
+    )
+
+    pulse_env_ids = env_ids[
+      env.episode_length_buf[env_ids] == self._trigger_steps[env_ids]
+    ]
+    if len(pulse_env_ids) == 0:
+      return
+    ranges = torch.tensor(
+      [force_range.get(axis, (0.0, 0.0)) for axis in ("x", "y", "z")],
+      device=env.device,
+    )
+    size = (len(pulse_env_ids), num_bodies, 3)
+    forces = sample_uniform(ranges[:, 0], ranges[:, 1], size, env.device)
+    torques = torch.zeros_like(forces)
+    asset.write_external_wrench_to_sim(
+      forces, torques, env_ids=pulse_env_ids, body_ids=body_ids
+    )
 
 
 ##

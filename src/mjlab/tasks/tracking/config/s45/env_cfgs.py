@@ -56,11 +56,20 @@ def kuavo_s45_flat_tracking_env_cfg(
         "asset_cfg"
     ].geom_names = r"^(left|right)_foot_col[1-7]$"
 
-    cfg.events["push_robot"].interval_range_s = (8.0, 12.0)
-    cfg.events["push_robot"].params["velocity_range"] = {
-        "x": (-0.08, 0.08), "y": (-0.08, 0.08), "z": (-0.03, 0.03),
-        "roll": (-0.1, 0.1), "pitch": (-0.1, 0.1), "yaw": (-0.15, 0.15),
-    }
+    # Replace non-physical root-velocity jumps with one-step force pulses.
+    cfg.events["push_robot"] = EventTermCfg(
+        func=mdp.ScheduledExternalForcePulse,
+        mode="interval",
+        interval_range_s=(0.0, 0.0),
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=("base_link",)),
+            "force_range": {
+                "x": (-150.0, 150.0),
+                "y": (-150.0, 150.0),
+                "z": (-87.5, 87.5),
+            },
+        },
+    )
     cfg.events["base_com"].params["ranges"] = {
         0: (-0.005, 0.005), 1: (-0.005, 0.005), 2: (-0.008, 0.008),
     }
@@ -216,6 +225,13 @@ def kuavo_s45_flat_tracking_env_cfg(
         func=mdp.RealRobotRandomizationCurriculum(
             start_iteration=17500,
             iterations_per_stage=5000,
+            rollout_steps=24,
+        )
+    )
+    cfg.curriculum["external_force_ramp"] = CurriculumTermCfg(
+        func=mdp.ExternalForceRampCurriculum(
+            start_iteration=31500,
+            iterations_per_stage=300,
             rollout_steps=24,
         )
     )

@@ -30,17 +30,6 @@ class RealRobotRandomizationCurriculum:
     scales = (0.25, 0.50, 0.75, 1.0)
     scale = scales[stage]
 
-    push_xy = (0.08, 0.16, 0.23, 0.30)[stage]
-    push_term = env.event_manager.get_term_cfg("push_robot")
-    push_term.interval_range_s = ((8, 12), (6, 9), (4.5, 7.5), (3, 6))[stage]
-    push_term.params["velocity_range"] = {
-      "x": (-push_xy, push_xy), "y": (-push_xy, push_xy),
-      "z": (-0.12 * scale, 0.12 * scale),
-      "roll": (-0.4 * scale, 0.4 * scale),
-      "pitch": (-0.4 * scale, 0.4 * scale),
-      "yaw": (-0.6 * scale, 0.6 * scale),
-    }
-
     com_xy = (0.005, 0.01, 0.015, 0.02)[stage]
     com_z = (0.008, 0.015, 0.023, 0.03)[stage]
     com_term = env.event_manager.get_term_cfg("base_com")
@@ -95,3 +84,33 @@ class RealRobotRandomizationCurriculum:
       if noise is not None:
         noise.n_min, noise.n_max = -magnitude * scale, magnitude * scale
         noise._tensor_cache.clear()
+
+
+class ExternalForceRampCurriculum:
+  """Ramp only the new force pulse while the main randomization stays at stage 2/3."""
+
+  def __init__(self, start_iteration: int, iterations_per_stage: int, rollout_steps: int):
+    self.start_iteration = start_iteration
+    self.iterations_per_stage = iterations_per_stage
+    self.rollout_steps = rollout_steps
+    self._stage = -1
+
+  def __call__(self, env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> dict[str, float]:
+    del env_ids
+    iteration = env.common_step_counter // self.rollout_steps
+    stage = max(0, min(3, (iteration - self.start_iteration) // self.iterations_per_stage))
+    if stage != self._stage:
+      xy_force = (150.0, 300.0, 600.0, 900.0)[stage]
+      z_force = xy_force * (7.0 / 12.0)
+      force_term = env.event_manager.get_term_cfg("push_robot")
+      force_term.params["force_range"] = {
+        "x": (-xy_force, xy_force),
+        "y": (-xy_force, xy_force),
+        "z": (-z_force, z_force),
+      }
+      self._stage = stage
+    return {
+      "stage": float(stage),
+      "iteration": float(iteration),
+      "xy_force_max_n": (150.0, 300.0, 600.0, 900.0)[stage],
+    }

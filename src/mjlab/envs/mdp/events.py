@@ -389,25 +389,17 @@ class ScheduledExternalForcePulse(ManagerTermBase):
     if len(pulse_env_ids) == 0:
       return
     size = (len(pulse_env_ids), num_bodies, 3)
-    # Most contacts are mild, while the configured maximum remains available
-    # as a rare recovery test: 70% low, 25% medium, 5% high severity.
-    severity = torch.rand((len(pulse_env_ids), num_bodies), device=env.device)
-    lower = torch.where(
-      severity < 0.70,
-      0.0,
-      torch.where(severity < 0.95, 1.0 / 3.0, 2.0 / 3.0),
+    # Match LejuLab's sampling semantics: XYZ components are sampled
+    # independently from symmetric uniform ranges. Z keeps its 7/12 ratio.
+    ranges = torch.tensor(
+      [
+        (-max_force_n, max_force_n),
+        (-max_force_n, max_force_n),
+        (-max_force_n * 7.0 / 12.0, max_force_n * 7.0 / 12.0),
+      ],
+      device=env.device,
     )
-    upper = torch.where(
-      severity < 0.70,
-      1.0 / 3.0,
-      torch.where(severity < 0.95, 2.0 / 3.0, 1.0),
-    )
-    magnitude = (lower + torch.rand_like(lower) * (upper - lower)) * max_force_n
-    angle = torch.rand_like(magnitude) * (2.0 * torch.pi)
-    forces = torch.zeros(size, device=env.device)
-    forces[..., 0] = magnitude * torch.cos(angle)
-    forces[..., 1] = magnitude * torch.sin(angle)
-    forces[..., 2] = (torch.rand_like(magnitude) * 0.6 - 0.3) * magnitude
+    forces = sample_uniform(ranges[:, 0], ranges[:, 1], size, env.device)
     torques = torch.zeros_like(forces)
     asset.write_external_wrench_to_sim(
       forces, torques, env_ids=pulse_env_ids, body_ids=body_ids

@@ -90,7 +90,7 @@ class RealRobotRandomizationCurriculum:
     motion_term = env.command_manager.get_term("motion")
     motion_term.cfg.joint_position_range = (-joint, joint)
 
-    motor_ranges = ((0, 2), (2, 5), (5, 9), (8, 12))
+    motor_ranges = ((0, 2), (2, 5), (5, 9), (0, 5))
     motor_min, motor_max = motor_ranges[stage]
     robot = env.scene["robot"]
     for actuator in robot.actuators:

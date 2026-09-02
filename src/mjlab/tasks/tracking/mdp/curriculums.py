@@ -133,12 +133,12 @@ class ExternalForceRampCurriculum:
     iteration = env.common_step_counter // self.rollout_steps
     stage = max(0, min(3, (iteration - self.start_iteration) // self.iterations_per_stage))
     if stage != self._stage:
-      xy_force = (150.0, 300.0, 450.0, 600.0)[stage]
+      xy_force = (150.0, 300.0, 600.0, 900.0)[stage]
       force_term = env.event_manager.get_term_cfg("push_robot")
       force_term.params["max_force_n"] = xy_force
       self._stage = stage
     return {
       "stage": float(stage),
       "iteration": float(iteration),
-      "xy_force_max_n": (150.0, 300.0, 450.0, 600.0)[stage],
+      "xy_force_max_n": (150.0, 300.0, 600.0, 900.0)[stage],
     }

@@ -63,11 +63,7 @@ def kuavo_s45_flat_tracking_env_cfg(
         interval_range_s=(0.0, 0.0),
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=("base_link",)),
-            "force_range": {
-                "x": (-150.0, 150.0),
-                "y": (-150.0, 150.0),
-                "z": (-87.5, 87.5),
-            },
+            "max_force_n": 150.0,
         },
     )
     cfg.events["base_com"].params["ranges"] = {
@@ -279,6 +275,7 @@ def kuavo_s45_flat_tracking_env_cfg(
         func=mdp.RealRobotRandomizationCurriculum(
             start_iteration=17500,
             iterations_per_stage=5000,
+            final_stage_iteration=33000,
             rollout_steps=24,
         )
     )

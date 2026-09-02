@@ -11,16 +11,25 @@ if TYPE_CHECKING:
 class RealRobotRandomizationCurriculum:
   """Increase S45 sim-to-real randomization every fixed PPO iteration block."""
 
-  def __init__(self, start_iteration: int, iterations_per_stage: int, rollout_steps: int):
+  def __init__(
+    self,
+    start_iteration: int,
+    iterations_per_stage: int,
+    rollout_steps: int,
+    final_stage_iteration: int | None = None,
+  ):
     self.start_iteration = start_iteration
     self.iterations_per_stage = iterations_per_stage
     self.rollout_steps = rollout_steps
+    self.final_stage_iteration = final_stage_iteration
     self._stage = -1
 
   def __call__(self, env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> dict[str, float]:
     del env_ids
     iteration = env.common_step_counter // self.rollout_steps
     stage = max(0, min(3, (iteration - self.start_iteration) // self.iterations_per_stage))
+    if self.final_stage_iteration is not None and iteration < self.final_stage_iteration:
+      stage = min(stage, 2)
     if stage != self._stage:
       self._apply_stage(env, stage)
       self._stage = stage
@@ -125,13 +134,8 @@ class ExternalForceRampCurriculum:
     stage = max(0, min(3, (iteration - self.start_iteration) // self.iterations_per_stage))
     if stage != self._stage:
       xy_force = (150.0, 300.0, 600.0, 900.0)[stage]
-      z_force = xy_force * (7.0 / 12.0)
       force_term = env.event_manager.get_term_cfg("push_robot")
-      force_term.params["force_range"] = {
-        "x": (-xy_force, xy_force),
-        "y": (-xy_force, xy_force),
-        "z": (-z_force, z_force),
-      }
+      force_term.params["max_force_n"] = xy_force
       self._stage = stage
     return {
       "stage": float(stage),

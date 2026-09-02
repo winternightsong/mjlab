@@ -371,7 +371,7 @@ class ScheduledExternalForcePulse(ManagerTermBase):
     self,
     env: ManagerBasedRlEnv,
     env_ids: torch.Tensor,
-    force_range: dict[str, tuple[float, float]],
+    max_force_n: float,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
   ) -> None:
     asset: Entity = env.scene[asset_cfg.name]
@@ -388,12 +388,26 @@ class ScheduledExternalForcePulse(ManagerTermBase):
     ]
     if len(pulse_env_ids) == 0:
       return
-    ranges = torch.tensor(
-      [force_range.get(axis, (0.0, 0.0)) for axis in ("x", "y", "z")],
-      device=env.device,
-    )
     size = (len(pulse_env_ids), num_bodies, 3)
-    forces = sample_uniform(ranges[:, 0], ranges[:, 1], size, env.device)
+    # Most contacts are mild, while the configured maximum remains available
+    # as a rare recovery test: 70% low, 25% medium, 5% high severity.
+    severity = torch.rand((len(pulse_env_ids), num_bodies), device=env.device)
+    lower = torch.where(
+      severity < 0.70,
+      0.0,
+      torch.where(severity < 0.95, 1.0 / 3.0, 2.0 / 3.0),
+    )
+    upper = torch.where(
+      severity < 0.70,
+      1.0 / 3.0,
+      torch.where(severity < 0.95, 2.0 / 3.0, 1.0),
+    )
+    magnitude = (lower + torch.rand_like(lower) * (upper - lower)) * max_force_n
+    angle = torch.rand_like(magnitude) * (2.0 * torch.pi)
+    forces = torch.zeros(size, device=env.device)
+    forces[..., 0] = magnitude * torch.cos(angle)
+    forces[..., 1] = magnitude * torch.sin(angle)
+    forces[..., 2] = (torch.rand_like(magnitude) * 0.6 - 0.3) * magnitude
     torques = torch.zeros_like(forces)
     asset.write_external_wrench_to_sim(
       forces, torques, env_ids=pulse_env_ids, body_ids=body_ids

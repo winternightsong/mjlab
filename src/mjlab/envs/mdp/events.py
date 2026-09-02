@@ -389,17 +389,20 @@ class ScheduledExternalForcePulse(ManagerTermBase):
     if len(pulse_env_ids) == 0:
       return
     size = (len(pulse_env_ids), num_bodies, 3)
-    # Match LejuLab's sampling semantics: XYZ components are sampled
-    # independently from symmetric uniform ranges. Z keeps its 7/12 ratio.
-    ranges = torch.tensor(
-      [
-        (-max_force_n, max_force_n),
-        (-max_force_n, max_force_n),
-        (-max_force_n * 7.0 / 12.0, max_force_n * 7.0 / 12.0),
-      ],
-      device=env.device,
+    # Independently sample each axis from a symmetric bimodal normal mixture.
+    # At full strength, XY clusters around +/-450 N with sigma 150 N and is
+    # clipped at +/-900 N. Z retains LejuLab's 7/12 scaling.
+    axis_scale = torch.tensor(
+      [1.0, 1.0, 7.0 / 12.0], device=env.device
+    ).view(1, 1, 3)
+    mean = 0.5 * max_force_n * axis_scale
+    std = (max_force_n / 6.0) * axis_scale
+    magnitude = torch.normal(mean.expand(size), std.expand(size)).clamp_min_(0.0)
+    magnitude = torch.minimum(magnitude, max_force_n * axis_scale)
+    signs = torch.where(
+      torch.rand(size, device=env.device) < 0.5, -1.0, 1.0
     )
-    forces = sample_uniform(ranges[:, 0], ranges[:, 1], size, env.device)
+    forces = magnitude * signs
     torques = torch.zeros_like(forces)
     asset.write_external_wrench_to_sim(
       forces, torques, env_ids=pulse_env_ids, body_ids=body_ids
